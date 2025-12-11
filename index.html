@@ -53,6 +53,13 @@
         .ai-btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
         .contact-btn { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
 
+        /* Pagination */
+        .pagination { display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px; padding-bottom: 40px; }
+        .page-btn { background: #fff; border: 1px solid #d0d5df; padding: 8px 16px; border-radius: 8px; cursor: pointer; color: #333; transition: all 0.2s; font-family: inherit; }
+        .page-btn:hover:not(:disabled) { border-color: #5d3df5; color: #5d3df5; background: #f8f9fc; }
+        .page-btn:disabled { opacity: 0.5; cursor: default; background: #f0f0f0; }
+        .page-info { font-size: 14px; color: #666; font-weight: bold; }
+
         /* Modal */
         .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px); }
         .modal-content { background: white; width: 90%; max-width: 500px; max-height: 80vh; border-radius: 16px; padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.2); overflow-y: auto; position: relative; animation: slideUp 0.3s ease; }
@@ -110,6 +117,9 @@
         const aiContent = document.getElementById('aiContent');
         const modalTitle = document.getElementById('modalTitle');
 
+        let currentQuery = '';
+        let currentPage = 1;
+
         // --- 1. Handle Suggestions (GET Request) ---
         function renderSuggestions(items){
             suggestionsEl.innerHTML = '';
@@ -125,7 +135,8 @@
                 div.addEventListener('click', () => {
                     input.value = text;
                     suggestionsEl.hidden = true;
-                    fetchSearch(text); // Trigger search on click
+                    // Reset to page 1 on new suggestion click
+                    fetchSearch(text, 1);
                 });
                 suggestionsEl.appendChild(div);
             });
@@ -170,7 +181,7 @@
             countInfo.className = 'muted';
             countInfo.style.padding = '0 0 10px 0';
             countInfo.style.textAlign = 'right';
-            countInfo.textContent = `یافت شده: ${jobPosts.length} فرصت شغلی`;
+            countInfo.textContent = `نتایج برای "${q}" - صفحه ${currentPage}`;
             resultsEl.appendChild(countInfo);
 
             jobPosts.forEach(job => {
@@ -207,9 +218,56 @@
             });
         }
 
-        async function fetchSearch(q){
+        // Render Pagination Controls
+        function renderPagination(totalCount, page) {
+            const pageSize = 30; // Based on log
+            const totalPages = Math.ceil(totalCount / pageSize);
+            
+            if (totalPages <= 1) return;
+
+            const div = document.createElement('div');
+            div.className = 'pagination';
+
+            // Previous Button
+            const prevBtn = document.createElement('button');
+            prevBtn.className = 'page-btn';
+            prevBtn.textContent = 'قبلی';
+            prevBtn.disabled = page === 1;
+            prevBtn.onclick = () => {
+                fetchSearch(currentQuery, page - 1);
+                // Scroll to top of results
+                resultsEl.scrollIntoView({behavior: 'smooth'});
+            };
+
+            // Info text
+            const info = document.createElement('span');
+            info.className = 'page-info';
+            info.textContent = `صفحه ${page} از ${totalPages}`;
+
+            // Next Button
+            const nextBtn = document.createElement('button');
+            nextBtn.className = 'page-btn';
+            nextBtn.textContent = 'بعدی';
+            nextBtn.disabled = page >= totalPages;
+            nextBtn.onclick = () => {
+                fetchSearch(currentQuery, page + 1);
+                resultsEl.scrollIntoView({behavior: 'smooth'});
+            };
+
+            div.appendChild(prevBtn);
+            div.appendChild(info);
+            div.appendChild(nextBtn);
+
+            resultsEl.appendChild(div);
+        }
+
+        async function fetchSearch(q, page = 1){
             q = (q||'').trim();
             if(!q) return;
+
+            // Update Global State
+            currentQuery = q;
+            currentPage = page;
 
             suggestionsEl.hidden = true; 
             loadingEl.hidden = false;
@@ -228,7 +286,7 @@
 
             const payload = {
                 pageSize: 30,
-                requestedPage: 1,
+                requestedPage: page, // Using dynamic page number
                 keyword: q,
                 sortBy: 1,
                 searchId: null
@@ -250,6 +308,10 @@
 
                 if(json && json.data && Array.isArray(json.data.jobPosts)){
                     renderResults(json.data.jobPosts, q);
+                    // Add Pagination Controls
+                    if (json.data.jobPostCount) {
+                        renderPagination(json.data.jobPostCount, page);
+                    }
                 } else {
                     renderResults([], q);
                 }
@@ -395,7 +457,8 @@
         input.addEventListener('keydown', (e) => {
             if(e.key === 'Enter'){
                 e.preventDefault();
-                fetchSearch(e.target.value);
+                // Reset to page 1 on new search
+                fetchSearch(e.target.value, 1);
             }
         });
     </script>
