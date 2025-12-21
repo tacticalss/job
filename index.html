@@ -15,8 +15,47 @@
         .search-input { width: 100%; padding: 14px 16px; font-size: 16px; border: 1px solid #d0d5df; border-radius: 12px; box-sizing: border-box; outline: none; transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
         .search-input:focus { border-color: #5d3df5; box-shadow: 0 4px 12px rgba(93, 61, 245, 0.15); }
 
-        .city-select { width: 200px; padding: 14px 16px; font-size: 15px; border: 1px solid #d0d5df; border-radius: 12px; outline: none; background: #fff; cursor: pointer; }
-        .city-select:focus { border-color: #5d3df5; }
+        /* --- New Custom Searchable Dropdown Styles --- */
+        .custom-select-wrap { position: relative; width: 200px; flex-shrink: 0; }
+        .custom-select-trigger { 
+            width: 100%; padding: 14px 16px; font-size: 15px; 
+            border: 1px solid #d0d5df; border-radius: 12px; 
+            background: #fff; cursor: pointer; display: flex; 
+            justify-content: space-between; align-items: center; 
+            box-sizing: border-box; user-select: none;
+            color: #444;
+        }
+        .custom-select-trigger::after { content: '▼'; font-size: 10px; color: #888; margin-right: 8px; }
+        
+        .custom-dropdown {
+            position: absolute; top: 105%; right: 0; left: 0; 
+            background: #fff; border: 1px solid #e0e4ea; 
+            border-radius: 12px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1); 
+            z-index: 1001; overflow: hidden; 
+            display: none; /* Hidden by default */
+        }
+        .custom-dropdown.open { display: block; animation: fadeIn 0.1s ease; }
+        
+        .dropdown-search-box { padding: 10px; border-bottom: 1px solid #f0f2f5; background: #fff; }
+        .dropdown-search-input {
+            width: 100%; padding: 8px 12px; border: 1px solid #ddd; 
+            border-radius: 8px; outline: none; font-family: inherit; font-size: 13px;
+            box-sizing: border-box; background: #fcfcfc;
+        }
+        .dropdown-search-input:focus { border-color: #5d3df5; background: #fff; }
+
+        .dropdown-options { max-height: 250px; overflow-y: auto; }
+        .dropdown-option { padding: 10px 16px; cursor: pointer; font-size: 14px; color: #444; border-bottom: 1px solid #f9f9f9; }
+        .dropdown-option:hover { background: #f6f7fb; color: #5d3df5; }
+        .dropdown-option.selected { background: #eef2ff; color: #5d3df5; font-weight: bold; }
+        
+        .dropdown-group-title { 
+            padding: 8px 12px; font-size: 12px; color: #999; 
+            background: #fafafa; font-weight: bold; 
+            pointer-events: none; border-bottom: 1px solid #eee;
+        }
+        /* ------------------------------------------- */
 
         /* Suggestions */
         .suggestions { position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px; background: #fff; border: 1px solid #e0e4ea; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); max-height: 300px; overflow-y: auto; z-index: 1000; }
@@ -66,6 +105,7 @@
         .contact-row { display: flex; gap: 8px; margin-bottom: 4px; font-size: 14px; }
         
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
         [hidden] { display: none !important; }
     </style>
 </head>
@@ -74,10 +114,17 @@
         <h2>جستجوی جامع مشاغل</h2>
         
         <div class="search-box-row">
-            <select id="citySelect" class="city-select">
-                <option value="">همه شهرها</option>
-                <option disabled>در حال دریافت لیست...</option>
-            </select>
+            <div class="custom-select-wrap" id="customCitySelect">
+                <div class="custom-select-trigger" id="cityTrigger">همه شهرها</div>
+                <div class="custom-dropdown" id="cityDropdown">
+                    <div class="dropdown-search-box">
+                        <input type="text" class="dropdown-search-input" id="citySearchInput" placeholder="جستجوی شهر..." autocomplete="off">
+                    </div>
+                    <div class="dropdown-options" id="cityOptions">
+                        <div style="padding:15px; text-align:center; color:#999; font-size:13px;">در حال دریافت لیست...</div>
+                    </div>
+                </div>
+            </div>
             
             <div class="search-container">
                 <input id="search" class="search-input" placeholder="عنوان شغلی (مثلا: برنامه نویس)..." aria-label="search" autocomplete="off" />
@@ -90,7 +137,6 @@
         <div id="pagination" class="pagination" hidden></div>
     </div>
 
-    <!-- Modal -->
     <div id="aiModal" class="modal-overlay" hidden>
         <div class="modal-content">
             <button class="modal-close" onclick="closeModal()">&times;</button>
@@ -106,7 +152,6 @@
         function debounce(fn, t){ let id; return (...args)=>{ clearTimeout(id); id = setTimeout(()=>fn(...args), t); }; }
 
         const input = document.getElementById('search');
-        const citySelect = document.getElementById('citySelect');
         const suggestionsEl = document.getElementById('suggestions');
         const resultsEl = document.getElementById('results');
         const loadingEl = document.getElementById('loading');
@@ -115,47 +160,115 @@
         const aiContent = document.getElementById('aiContent');
         const modalTitle = document.getElementById('modalTitle');
 
+        // Dropdown Elements
+        const cityTrigger = document.getElementById('cityTrigger');
+        const cityDropdown = document.getElementById('cityDropdown');
+        const citySearchInput = document.getElementById('citySearchInput');
+        const cityOptions = document.getElementById('cityOptions');
+        const customCitySelect = document.getElementById('customCitySelect');
+
         let currentQuery = '';
         let currentPage = 1;
+        
+        // City State
+        let selectedCityValue = "";
+        let selectedCityName = "";
+        let allCityData = []; // Store raw data for filtering
 
-        // --- 0. Load Cities on Startup ---
+        // --- 0. Load Cities & Dropdown Logic ---
         async function loadCities() {
             try {
                 const res = await fetch(`${WORKER_URL}/cities`);
                 const json = await res.json();
                 
-                // Parse hierarchical data (Province -> Children)
                 if (json.data && Array.isArray(json.data)) {
-                    citySelect.innerHTML = '<option value="">همه شهرها</option>';
-                    
-                    json.data.forEach(province => {
-                        const group = document.createElement('optgroup');
-                        group.label = province.title;
-                        
-                        // Add province itself if needed, or usually just children
-                        // JobVision sometimes has "All cities of X" as a child
-                        
-                        if (province.children) {
-                            province.children.forEach(city => {
-                                const option = document.createElement('option');
-                                // CHANGE: Use urlParameter instead of ID for JobVision/IranTalent
-                                option.value = city.urlParameter; 
-                                option.textContent = city.title;
-                                // Store Persian title for E-Estekhdam filter
-                                option.setAttribute('data-title', city.title);
-                                group.appendChild(option);
-                            });
-                        }
-                        
-                        citySelect.appendChild(group);
-                    });
+                    allCityData = json.data;
+                    renderCityOptions(allCityData);
                 }
             } catch (e) {
                 console.error("Failed to load cities", e);
-                citySelect.innerHTML = '<option value="">خطا در دریافت شهرها</option>';
+                cityOptions.innerHTML = '<div style="padding:15px;text-align:center;color:red;font-size:13px;">خطا در دریافت شهرها</div>';
             }
         }
-        
+
+        function renderCityOptions(data, filterText = '') {
+            cityOptions.innerHTML = '';
+            const normalizedFilter = filterText.trim().toLowerCase();
+
+            // Default Option (All Cities)
+            if(!normalizedFilter) {
+                const allOption = document.createElement('div');
+                allOption.className = 'dropdown-option' + (selectedCityValue === "" ? ' selected' : '');
+                allOption.textContent = 'همه شهرها';
+                allOption.onclick = () => selectCity("", "");
+                cityOptions.appendChild(allOption);
+            }
+
+            let hasResult = false;
+
+            data.forEach(province => {
+                // Filter logic
+                const children = province.children || [];
+                const filteredChildren = children.filter(c => c.title.toLowerCase().includes(normalizedFilter));
+                
+                if (filteredChildren.length > 0) {
+                    hasResult = true;
+                    // Group Title
+                    const groupTitle = document.createElement('div');
+                    groupTitle.className = 'dropdown-group-title';
+                    groupTitle.textContent = province.title;
+                    cityOptions.appendChild(groupTitle);
+
+                    filteredChildren.forEach(city => {
+                        const option = document.createElement('div');
+                        option.className = 'dropdown-option' + (selectedCityValue === city.urlParameter ? ' selected' : '');
+                        option.textContent = city.title;
+                        option.onclick = () => selectCity(city.urlParameter, city.title);
+                        cityOptions.appendChild(option);
+                    });
+                }
+            });
+
+            if (!hasResult && normalizedFilter) {
+                cityOptions.innerHTML = '<div style="padding:15px;text-align:center;color:#999;font-size:13px;">موردی یافت نشد</div>';
+            }
+        }
+
+        function selectCity(value, title) {
+            selectedCityValue = value;
+            selectedCityName = title || "همه شهرها";
+            
+            cityTrigger.textContent = selectedCityName;
+            if(!value) cityTrigger.textContent = "همه شهرها"; // Fallback for empty
+            
+            cityDropdown.classList.remove('open');
+            // Re-render to update selected state styling
+            renderCityOptions(allCityData);
+        }
+
+        // Toggle Dropdown
+        cityTrigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cityDropdown.classList.toggle('open');
+            if (cityDropdown.classList.contains('open')) {
+                citySearchInput.value = ''; // Reset search on open
+                renderCityOptions(allCityData); // Reset list
+                setTimeout(() => citySearchInput.focus(), 100);
+            }
+        });
+
+        // Filter on Type
+        citySearchInput.addEventListener('input', (e) => {
+            renderCityOptions(allCityData, e.target.value);
+        });
+
+        // Close on Outside Click
+        document.addEventListener('click', (e) => {
+            if (!customCitySelect.contains(e.target)) {
+                cityDropdown.classList.remove('open');
+            }
+        });
+
         loadCities();
 
         // --- 1. Suggestions (Proxied via Worker) ---
@@ -204,16 +317,10 @@
             resultsEl.innerHTML = '';
             paginationEl.hidden = true;
             
-            const selectedCityParam = citySelect.value;
-            // Get Persian Title from selected option
-            let selectedCityName = null;
-            if (citySelect.selectedIndex >= 0) {
-                const selectedOption = citySelect.options[citySelect.selectedIndex];
-                // Only get data-title if it's not the default "All Cities" option
-                if (selectedOption.value) {
-                    selectedCityName = selectedOption.getAttribute('data-title');
-                }
-            }
+            // Use the variables from our custom dropdown
+            const cityParam = selectedCityValue;
+            // For E-Estekhdam we need the title. If empty/null, send null
+            const cityTitle = selectedCityValue ? selectedCityName : null;
 
             try {
                 // Sending payload including CITY (URL Parameter) and Persian Title
@@ -223,8 +330,8 @@
                     body: JSON.stringify({ 
                         keyword: q, 
                         page: page,
-                        city: selectedCityParam, // Send City Slug (for JobVision & IranTalent)
-                        cityTitle: selectedCityName // Send Persian Title (for E-Estekhdam)
+                        city: cityParam, 
+                        cityTitle: cityTitle 
                     })
                 });
 
