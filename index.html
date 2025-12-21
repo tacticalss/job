@@ -6,12 +6,17 @@
     <title>جستجوی جامع مشاغل (مولتی سورس)</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f6f7fb; direction: rtl; }
-        .search-wrap { max-width: 700px; margin: 60px auto; padding: 0 20px; position: relative; }
+        .search-wrap { max-width: 800px; margin: 60px auto; padding: 0 20px; position: relative; }
         h2 { text-align: center; color: #333; margin-bottom: 20px; }
         
-        .search-container { position: relative; }
+        .search-box-row { display: flex; gap: 10px; position: relative; }
+        
+        .search-container { flex-grow: 1; position: relative; }
         .search-input { width: 100%; padding: 14px 16px; font-size: 16px; border: 1px solid #d0d5df; border-radius: 12px; box-sizing: border-box; outline: none; transition: all 0.2s; box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
         .search-input:focus { border-color: #5d3df5; box-shadow: 0 4px 12px rgba(93, 61, 245, 0.15); }
+
+        .city-select { width: 200px; padding: 14px 16px; font-size: 15px; border: 1px solid #d0d5df; border-radius: 12px; outline: none; background: #fff; cursor: pointer; }
+        .city-select:focus { border-color: #5d3df5; }
 
         /* Suggestions */
         .suggestions { position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px; background: #fff; border: 1px solid #e0e4ea; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); max-height: 300px; overflow-y: auto; z-index: 1000; }
@@ -67,9 +72,17 @@
 <body>
     <div class="search-wrap">
         <h2>جستجوی جامع مشاغل</h2>
-        <div class="search-container">
-            <input id="search" class="search-input" placeholder="عنوان شغلی (مثلا: برنامه نویس، حسابدار)..." aria-label="search" autocomplete="off" />
-            <div id="suggestions" class="suggestions" hidden></div>
+        
+        <div class="search-box-row">
+            <select id="citySelect" class="city-select">
+                <option value="">همه شهرها</option>
+                <option disabled>در حال دریافت لیست...</option>
+            </select>
+            
+            <div class="search-container">
+                <input id="search" class="search-input" placeholder="عنوان شغلی (مثلا: برنامه نویس)..." aria-label="search" autocomplete="off" />
+                <div id="suggestions" class="suggestions" hidden></div>
+            </div>
         </div>
         
         <div id="loading" style="text-align:center; padding:20px; color:#666;" hidden>در حال جمع‌آوری آگهی‌ها از منابع مختلف...</div>
@@ -93,6 +106,7 @@
         function debounce(fn, t){ let id; return (...args)=>{ clearTimeout(id); id = setTimeout(()=>fn(...args), t); }; }
 
         const input = document.getElementById('search');
+        const citySelect = document.getElementById('citySelect');
         const suggestionsEl = document.getElementById('suggestions');
         const resultsEl = document.getElementById('results');
         const loadingEl = document.getElementById('loading');
@@ -104,11 +118,50 @@
         let currentQuery = '';
         let currentPage = 1;
 
+        // --- 0. Load Cities on Startup ---
+        async function loadCities() {
+            try {
+                const res = await fetch(`${WORKER_URL}/cities`);
+                const json = await res.json();
+                
+                // Parse hierarchical data (Province -> Children)
+                if (json.data && Array.isArray(json.data)) {
+                    citySelect.innerHTML = '<option value="">همه شهرها</option>';
+                    
+                    json.data.forEach(province => {
+                        const group = document.createElement('optgroup');
+                        group.label = province.title;
+                        
+                        // Add province itself if needed, or usually just children
+                        // JobVision sometimes has "All cities of X" as a child
+                        
+                        if (province.children) {
+                            province.children.forEach(city => {
+                                const option = document.createElement('option');
+                                // CHANGE: Use urlParameter instead of ID for JobVision/IranTalent
+                                option.value = city.urlParameter; 
+                                option.textContent = city.title;
+                                // Store Persian title for E-Estekhdam filter
+                                option.setAttribute('data-title', city.title);
+                                group.appendChild(option);
+                            });
+                        }
+                        
+                        citySelect.appendChild(group);
+                    });
+                }
+            } catch (e) {
+                console.error("Failed to load cities", e);
+                citySelect.innerHTML = '<option value="">خطا در دریافت شهرها</option>';
+            }
+        }
+        
+        loadCities();
+
         // --- 1. Suggestions (Proxied via Worker) ---
         async function fetchSuggestions(q){
             q = (q||'').trim();
             if(!q){ suggestionsEl.hidden = true; return; }
-            // Worker endpoint specifically for suggestions
             const url = `${WORKER_URL}/api/v1/Basedata/GetListOfSuggestedKeywords?keyword=${encodeURIComponent(q)}`;
             try{
                 const resp = await fetch(url);
@@ -150,13 +203,29 @@
             loadingEl.hidden = false;
             resultsEl.innerHTML = '';
             paginationEl.hidden = true;
+            
+            const selectedCityParam = citySelect.value;
+            // Get Persian Title from selected option
+            let selectedCityName = null;
+            if (citySelect.selectedIndex >= 0) {
+                const selectedOption = citySelect.options[citySelect.selectedIndex];
+                // Only get data-title if it's not the default "All Cities" option
+                if (selectedOption.value) {
+                    selectedCityName = selectedOption.getAttribute('data-title');
+                }
+            }
 
             try {
-                // Sending simple payload to worker
+                // Sending payload including CITY (URL Parameter) and Persian Title
                 const resp = await fetch(`${WORKER_URL}/search`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ keyword: q, page: page })
+                    body: JSON.stringify({ 
+                        keyword: q, 
+                        page: page,
+                        city: selectedCityParam, // Send City Slug (for JobVision & IranTalent)
+                        cityTitle: selectedCityName // Send Persian Title (for E-Estekhdam)
+                    })
                 });
 
                 const json = await resp.json();
@@ -219,8 +288,6 @@
         }
 
         function renderPagination(currentCount, page){
-            // Simple pagination logic since we don't have true total count from aggregated API easily
-            // We assume if we got results, there might be a next page
             paginationEl.innerHTML = '';
             
             const prevBtn = document.createElement('button');
@@ -232,7 +299,6 @@
             const nextBtn = document.createElement('button');
             nextBtn.className = 'page-btn';
             nextBtn.innerText = 'صفحه بعد';
-            // Disable next if very few results returned (likely end of list)
             nextBtn.disabled = currentCount < 5; 
             nextBtn.onclick = () => fetchSearch(currentQuery, page + 1);
 
@@ -242,7 +308,6 @@
         }
 
         // --- AI Features ---
-        // (Same logic as before, just kept for completeness)
         async function analyzeJob(title, company) {
             aiModal.hidden = false;
             modalTitle.innerText = '✨ تحلیل هوشمند';
@@ -268,17 +333,15 @@
             modalTitle.innerText = '📞 اطلاعات تماس';
             modalTitle.style.borderRightColor = '#38ef7d';
             aiContent.innerHTML = 'در حال جستجو...';
-            // Note: Since we are using the new worker as aggregator, 
-            // if you added /extract-contact logic to it, use WORKER_URL/extract-contact
-            // Otherwise fall back to the external perp worker
             try {
+                // Using external worker for contact info as before
                 const res = await fetch('https://perp.messagersr.workers.dev/', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ company })
                 });
                 const json = await res.json();
-                const data = (json.data || json); // Handle format variations
+                const data = (json.data || json); 
                 if(Array.isArray(data) && data.length){
                     aiContent.innerHTML = data.map(d => `
                         <div class="contact-item">
